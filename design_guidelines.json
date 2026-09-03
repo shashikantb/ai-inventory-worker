@@ -1,0 +1,152 @@
+{
+  "project_name": "AI INVENTORY WORKER",
+  "tagline": "Ask. Scan. Find. Act.",
+  "app_type": "saas_app",
+  "archetype": "THE PERFORMANCE PRO / TACTICAL MINIMALISM",
+  "theme": {
+    "default_mode": "dark",
+    "toggle_supported": true,
+    "description": "High-contrast tactical dark background with warm industrial slate & amber accents for warehouse legibility, with smooth light mode toggle for office managers."
+  },
+  "typography": {
+    "heading_font": "Barlow Condensed, sans-serif",
+    "body_font": "Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "font_imports": [
+      "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+    ],
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight uppercase font-heading",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight font-heading",
+      "h3": "text-xl sm:text-2xl font-bold font-heading",
+      "h4": "text-lg sm:text-xl font-semibold",
+      "body": "text-base leading-relaxed font-body",
+      "caption": "text-xs tracking-wider uppercase font-mono text-muted-foreground",
+      "kpi_value": "text-3xl sm:text-4xl font-black font-mono tracking-tight"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#0B0F17",
+      "foreground": "#F3F4F6",
+      "card": "#111827",
+      "card_foreground": "#F9FAFB",
+      "popover": "#1F2937",
+      "popover_foreground": "#F9FAFB",
+      "primary": "#F59E0B",
+      "primary_foreground": "#0B0F17",
+      "secondary": "#1E293B",
+      "secondary_foreground": "#E2E8F0",
+      "accent": "#3B82F6",
+      "accent_foreground": "#FFFFFF",
+      "destructive": "#EF4444",
+      "destructive_foreground": "#FFFFFF",
+      "success": "#10B981",
+      "success_foreground": "#064E3B",
+      "warning": "#F59E0B",
+      "muted": "#1F2937",
+      "muted_foreground": "#9CA3AF",
+      "border": "#374151",
+      "input": "#374151",
+      "ring": "#F59E0B"
+    },
+    "contrast_rules": [
+      "All standard body text must achieve > 4.5:1 APCA/WCAG AA contrast.",
+      "Interactive buttons and status badges must explicit hover text color (e.g., hover:text-white).",
+      "Never use pure transparent backgrounds on sticky headers or modals — always use backdrop-blur with bg-black/70 or bg-slate-900/90."
+    ]
+  },
+  "spacing_and_layout": {
+    "generous_spacing": true,
+    "border_padding_rule": "Containers with borders MUST contain internal padding (p-4 to p-8) to eliminate text collision.",
+    "bento_grid_mode": "MODE B: High Density Grid (Dashboards) & MODE A: Tetris Grid (Mobile Frontline Scanner & Landing)",
+    "mobile_touch_targets": "Min 48px height (h-12 or h-14) for scanner buttons, barcode triggers, and action approvals on mobile.",
+    "alignment_rules": "Left align for data tables, lists, and forms. Center align only high-impact hero headings or scanner camera viewfinders."
+  },
+  "visual_enhancers": {
+    "surface_styles": {
+      "tracing_beam": "1px glowing amber stroke around priority action cards (e.g., Low Stock Alerts & Approval Needed).",
+      "tactical_card": "bg-slate-900/90 border border-slate-700/80 rounded-lg shadow-sm backdrop-blur-md",
+      "glassmorphism": "backdrop-blur-xl bg-slate-950/80 border border-white/10"
+    },
+    "textures": "Subtle dark slate grid lines overlay with opacity 0.05 for technical warehouse aesthetic.",
+    "animations": "Framer Motion page transitions, micro-pulse for camera laser scanner line, smooth chart tooltips."
+  },
+  "component_strategy": {
+    "file_format": ".js React files",
+    "navigation": "Sticky top bar + collapsible sidebar with Role Selector (Super Admin, Org Admin, Manager, Worker) & Org Switcher.",
+    "shadcn_components": [
+      "Dialog / Modal for OCR scan preview, CSV upload wizard, and stock adjustment approval",
+      "Select & Combobox for Warehouse hierarchy (Warehouse -> Zone -> Aisle -> Rack -> Shelf -> Bin)",
+      "Tabs for dashboard views and product detail sections",
+      "Badge for stock status (In Stock, Low Stock, Out of Stock, Pending Approval)",
+      "Sonner for instant scan/action notifications"
+    ],
+    "custom_components": [
+      "AI Assistant Drawer / Chat widget (natural language search & voice input trigger)",
+      "Webcam Barcode & QR Code scanner overlay with target frame animation",
+      "Image Upload & OCR extraction preview box",
+      "Warehouse Location Hierarchy Tree Selector",
+      "Audit Log Feed with user avatars & action timestamps"
+    ]
+  },
+  "key_screens": [
+    "Dashboard (KPI Cards, Recharts Inventory Trends, Stock Health, Low Stock Alerts Widget)",
+    "AI Assistant Chat ('Ask. Scan. Find. Act.' natural language query & automated execution)",
+    "Scan Product (Webcam Barcode Scanner, Image Recognition Upload, Live OCR Text Extractor)",
+    "Product Search & Catalog (Filtering, Category, Location Filter, Stock Status)",
+    "Product Details (Image, Hierarchical Bin Location, Movement History, Barcode/QR Generator)",
+    "Inventory List & Batch Operations (Multi-select adjust, transfer, audit)",
+    "Warehouse Hierarchy (Interactive Tree: Org -> Warehouse -> Zone -> Aisle -> Rack -> Shelf -> Bin)",
+    "Low Stock Alerts & Reorder Workflow (Threshold settings, automated alert triggers)",
+    "Reports & Analytics (Export CSV/PDF, Turn-rate charts, Stockout risk index)",
+    "Integrations Wizard (ERP, Shopify, Quickbooks mock syncs)",
+    "Users & Roles Management (Multi-tenant org roles: Super Admin, Org Admin, Manager, Worker)",
+    "Settings & Audit Logs (Tenant config, webhook triggers, system activity)"
+  ],
+  "image_urls": {
+    "warehouse_modula_lift": {
+      "url": "https://images.unsplash.com/photo-1786026632790-1f228b894919?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHw0fHx3YXJlaG91c2UlMjB3b3JrZXIlMjBzY2FubmluZyUyMGludmVudG9yeSUyMGJveCUyMGxvZ2lzdGljc3xlbnwwfHx8fDE3ODg0MDc0Mjl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Warehouse operator using automated storage lift system",
+      "category": "Hero / Scanner Demo / Landing Page"
+    },
+    "warehouse_worker_tablet": {
+      "url": "https://images.unsplash.com/photo-1781559818983-c32838ee3d55?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwzfHx3YXJlaG91c2UlMjB3b3JrZXIlMjBzY2FubmluZyUyMGludmVudG9yeSUyMGJveCUyMGxvZ2lzdGljc3xlbnwwfHx8fDE3ODg0MDc0Mjl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Warehouse manager checking inventory on tablet in aisle",
+      "category": "Frontline Worker / Mobile Scan Screen"
+    },
+    "warehouse_worker_shelves": {
+      "url": "https://images.unsplash.com/photo-1764795850513-fa8a469a4600?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwyfHx3YXJlaG91c2UlMjB3b3JrZXIlMjBzY2FubmluZyUyMGludmVudG9yeSUyMGJveCUyMGxvZ2lzdGljc3xlbnwwfHx8fDE3ODg0MDc0Mjl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Worker auditing shelf stock with smart device",
+      "category": "Inventory Audit / Product Finder"
+    },
+    "warehouse_rack_boxes": {
+      "url": "https://images.unsplash.com/photo-1587293852726-70cdb56c2866?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHxfHx3YXJlaG91c2UlMjBzaGVsdmVzJTIwaW5kdXN0cmlhbCUyMGxvZ2lzdGljcyUyMGJveGVzfGVufDB8fHx8MTc4ODQwNzQ0M3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Industrial cardboard storage boxes on heavy metal rack",
+      "category": "Warehouse Zone / Product Detail Cards"
+    },
+    "warehouse_full_aisle": {
+      "url": "https://images.unsplash.com/photo-1553413077-190dd305871c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHwzfHx3YXJlaG91c2UlMjBzaGVsdmVzJTIwaW5kdXN0cmlhbCUyMGxvZ2lzdGljcyUyMGJveGVzfGVufDB8fHx8MTc4ODQwNzQ0M3ww&ixlib=rb-4.1.0&q=85",
+      "description": "High-bay logistics warehouse aisle with multi-tier storage",
+      "category": "Warehouse Hierarchy Overview"
+    }
+  },
+  "testing_attributes": {
+    "data_testid_rule": "Every button, input, tab, card, menu item, and status alert MUST include a descriptive data-testid attribute.",
+    "examples": [
+      "data-testid=\"ai-chat-input\"",
+      "data-testid=\"start-webcam-scan-btn\"",
+      "data-testid=\"product-search-bar\"",
+      "data-testid=\"low-stock-alert-card\"",
+      "data-testid=\"org-role-selector\""
+    ]
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Target JavaScript (.js/.jsx) implementations.",
+    "Ensure high contrast on dark surfaces: body text must be text-slate-100 or text-slate-200.",
+    "Never use generic centered layouts or unstyled default HTML select boxes.",
+    "Implement Sonner toast notifications for scan confirmations, AI tool calls, and stock adjustments.",
+    "Make mobile scanner experience feel native with clear action buttons (Voice, Scan, Upload, AI Ask).",
+    "Keep all code cleanly modularized in src/components."
+  ]
+}

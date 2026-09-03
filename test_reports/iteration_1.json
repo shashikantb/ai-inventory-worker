@@ -1,0 +1,29 @@
+{
+  "summary": "MVP smoke tested end-to-end. Backend auth, dashboard stats, products search, barcode scan, low-stock inventory, audit logs, and Claude SSE AI chat with tool calling all pass. Frontend login → dashboard → products search → manual barcode scan → AI streaming (returns Pune Warehouse → Zone B → Aisle 4 → Rack 12 → Shelf 3 via FIND_PRODUCT_LOCATION tool) → inventory/warehouses/users/import/audit nav → logout all pass.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login returns JWT (field name 'token') + org_admin user",
+    "GET /api/auth/me with bearer token",
+    "GET /api/dashboard/stats: total_products=8, total_units=433, low_stock=2, stock_by_warehouse (Pune 291, Mumbai 142)",
+    "GET /api/products?q=samsung returns SM-XYZ-2026 Samsung Monitor 24M XYZ",
+    "GET /api/scan/barcode/8901234567890 returns Samsung Monitor + inventory (Pune Warehouse)",
+    "GET /api/inventory?low_stock=true returns low-stock rows",
+    "GET /api/audit-logs 200",
+    "POST /api/ai/chat SSE streams text/tool_start/tool_result(get_low_stock)/done with Claude",
+    "Frontend /login submit → redirect /app/dashboard with KPI cards visible (Products 8, Total Units 433, Low Stock 2, Warehouses 2)",
+    "Frontend /app/products search 'samsung' filters to Samsung Monitor",
+    "Frontend /app/scan manual barcode 8901234567890 shows 'Found: Samsung Monitor 24M XYZ'",
+    "Frontend /app/ai streams response using FIND_PRODUCT_LOCATION tool with correct location path",
+    "Frontend /app/inventory, /app/warehouses, /app/users, /app/import, /app/audit all load 200 with no errors",
+    "Frontend logout-btn returns user to /login"
+  ],
+  "failed": [],
+  "action_items": [
+    "Non-blocking: Recharts warning 'width(-1) height(-1) of chart' on dashboard — cosmetic; consider setting minWidth/minHeight on chart container.",
+    "Note (informational): login response uses key 'token' (not 'access_token'); ensure frontend AuthContext expects 'token' (it works, so already aligned)."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": "Did not test: POST /api/scan/image (Gemini image ID), CSV import upload, multi-tenant isolation with second org, role guard (worker 403), POST /api/products/warehouses/users/locations creation, POST /api/inventory/adjust — deferred to full testing agent. Requested scope covered the critical happy paths."
+}

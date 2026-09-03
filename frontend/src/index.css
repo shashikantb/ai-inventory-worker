@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --background: 220 30% 7%;
+  --foreground: 210 20% 96%;
+  --card: 220 26% 11%;
+  --card-foreground: 210 20% 98%;
+  --popover: 220 24% 14%;
+  --popover-foreground: 210 20% 98%;
+  --primary: 38 92% 50%;
+  --primary-foreground: 220 30% 7%;
+  --secondary: 220 20% 17%;
+  --secondary-foreground: 210 20% 92%;
+  --accent: 217 91% 60%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --muted: 220 20% 17%;
+  --muted-foreground: 217 10% 65%;
+  --border: 220 15% 25%;
+  --input: 220 15% 22%;
+  --ring: 38 92% 50%;
+  --radius: 0.5rem;
+  --chart-1: 38 92% 50%;
+  --chart-2: 217 91% 60%;
+  --chart-3: 160 84% 39%;
+  --chart-4: 340 82% 60%;
+  --chart-5: 262 83% 65%;
+}
+
+.light {
+  --background: 0 0% 100%;
+  --foreground: 220 30% 8%;
+  --card: 210 20% 98%;
+  --card-foreground: 220 30% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 30% 8%;
+  --primary: 38 92% 46%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 20% 94%;
+  --secondary-foreground: 220 30% 12%;
+  --accent: 217 91% 55%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --muted: 210 20% 94%;
+  --muted-foreground: 220 10% 40%;
+  --border: 220 13% 88%;
+  --input: 220 13% 90%;
+  --ring: 38 92% 46%;
+}
+
+* { border-color: hsl(var(--border)); }
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(245, 158, 11, 0.06), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(59, 130, 246, 0.05), transparent 40%);
+  background-attachment: fixed;
+}
+
+.light body {
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(245, 158, 11, 0.05), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(59, 130, 246, 0.04), transparent 40%);
+}
+
+.font-heading { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.01em; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* Tactical grid overlay */
+.grid-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(hsl(var(--border) / 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border) / 0.15) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+}
+
+/* Scanner laser animation */
+@keyframes laser {
+  0% { transform: translateY(0); opacity: 0.9; }
+  50% { transform: translateY(180px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 0.9; }
+}
+.scanner-laser {
+  animation: laser 2.2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+.pulse-amber { animation: pulse-ring 2s infinite; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: hsl(var(--background)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+.tactical-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease, transform 0.15s ease;
+}
+.tactical-card:hover { border-color: hsl(var(--primary) / 0.5); }
+
+.glow-primary { box-shadow: 0 0 0 1px hsl(var(--primary) / 0.4), 0 8px 32px -8px hsl(var(--primary) / 0.35); }
+
+.kpi-value { font-family: 'JetBrains Mono', monospace; font-weight: 800; letter-spacing: -0.02em; }
