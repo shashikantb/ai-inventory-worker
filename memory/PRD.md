@@ -76,3 +76,26 @@ Build a universal AI-powered SaaS platform for warehouse & inventory operations 
 - Bulk transfer wizard
 - Supplier + purchase-order module
 - More languages, timezone-aware audit
+
+---
+
+## Iteration 2 (Feb 2026): Voice, Connectors, Barcode Labels, Approvals
+
+### Added
+- **Voice** — `POST /api/voice/transcribe` (OpenAI Whisper via Emergent Universal Key, multilingual). Mic button in AI Chat that records via MediaRecorder → uploads webm → transcript auto-sends to chat.
+- **ERP Connectors** — full CRUD `/api/connectors` supporting **REST API**, **PostgreSQL**, **MySQL** (SQLAlchemy). Field-mapping UI (source column → AIW field). `POST /:id/test` fetches 3 sample rows; `POST /:id/sync` upserts products. Passwords/auth values masked in list response.
+- **Barcode Label Studio** — `GET /api/products/:id/label?kind=barcode|qr&count=10` returns A4 PDF (Code128 or QR) using python-barcode + qrcode + reportlab. "Barcode labels" & "QR labels" buttons on ProductDetail open PDF in a new tab.
+- **Approval Workflow** — Workers submitting `POST /api/inventory/adjust` with |delta| > 50 are auto-routed into `approvals` collection instead of applied. Managers/admins see pending queue at `/app/approvals` with Approve/Reject dialogs. Approve executes the original adjust; both decisions are audited.
+
+### Tested (curl e2e)
+- REST connector to jsonplaceholder → 3 rows fetched, sample identified
+- Barcode PDF → 14 KB response, `application/pdf`
+- Worker +100 units → returned `{approval_required: true, approval_id: ...}`; +3 units → auto-applied
+- Approval visible in admin UI with correct product, warehouse, delta and requester
+
+### Backlog remaining
+- Real-time sync via webhooks
+- Scheduled connector polling (P1)
+- Native mobile PWA shell
+- Product image upload / thumbnails
+- Supplier & purchase-order module

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, MessageSquare, ScanLine, Package, Warehouse, Users, Upload, ScrollText, LogOut, Menu, X, Sparkles, Boxes } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ScanLine, Package, Warehouse, Users, Upload, ScrollText, LogOut, Menu, X, Sparkles, Boxes, Plug, ClipboardCheck } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 
@@ -14,6 +14,8 @@ const NAV = [
   { to: "/app/inventory", label: "Inventory", icon: Boxes, testid: "nav-inventory" },
   { to: "/app/warehouses", label: "Warehouses", icon: Warehouse, testid: "nav-warehouses" },
   { to: "/app/import", label: "Import", icon: Upload, testid: "nav-import" },
+  { to: "/app/connectors", label: "Connectors", icon: Plug, testid: "nav-connectors", roles: ["org_admin"] },
+  { to: "/app/approvals", label: "Approvals", icon: ClipboardCheck, testid: "nav-approvals", roles: ["org_admin", "manager"] },
   { to: "/app/users", label: "Users", icon: Users, testid: "nav-users", roles: ["org_admin", "manager"] },
   { to: "/app/audit", label: "Audit Logs", icon: ScrollText, testid: "nav-audit", roles: ["org_admin", "manager"] },
 ];

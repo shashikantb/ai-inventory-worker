@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Sparkles, Send, Loader2, User, Wrench, Bot } from "lucide-react";
+import { Sparkles, Send, Loader2, User, Wrench, Bot, Mic, MicOff } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -21,7 +22,38 @@ export default function AIChat() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [model, setModel] = useState("claude");
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRef = useRef(null);
+  const chunksRef = useRef([]);
   const endRef = useRef(null);
+
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setTranscribing(true);
+        try {
+          const fd = new FormData();
+          fd.append("file", blob, "voice.webm");
+          const { data } = await api.post("/voice/transcribe", fd, { headers: { "Content-Type": "multipart/form-data" } });
+          const text = (data.text || "").trim();
+          if (text) send(text);
+          else toast.error("Nothing transcribed");
+        } catch (err) { toast.error(err.response?.data?.detail || "Transcription failed"); }
+        finally { setTranscribing(false); }
+      };
+      mediaRef.current = mr;
+      mr.start();
+      setRecording(true);
+    } catch (e) { toast.error("Microphone error: " + e.message); }
+  };
+  const stopRec = () => { mediaRef.current?.stop(); setRecording(false); };
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -136,7 +168,10 @@ export default function AIChat() {
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex gap-2 border-t border-border pt-4">
-        <Input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about a product, inventory, or location…" data-testid="ai-chat-input" className="h-12 text-base" disabled={loading} />
+        <Input value={input} onChange={e => setInput(e.target.value)} placeholder={recording ? "Recording…" : (transcribing ? "Transcribing…" : "Ask about a product, inventory, or location…")} data-testid="ai-chat-input" className="h-12 text-base" disabled={loading || recording || transcribing} />
+        <Button type="button" onClick={recording ? stopRec : startRec} disabled={loading || transcribing} className={`h-12 w-12 p-0 shrink-0 ${recording ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 pulse-amber" : "bg-accent text-accent-foreground hover:bg-accent/90"}`} data-testid="ai-mic-btn" title={recording ? "Stop recording" : "Speak"}>
+          {transcribing ? <Loader2 className="w-4 h-4 animate-spin" /> : recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        </Button>
         <Button type="submit" disabled={loading || !input.trim()} className="h-12 px-6 bg-primary text-primary-foreground hover:bg-primary/90" data-testid="ai-chat-send-btn">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </Button>

@@ -13,6 +13,17 @@ import os, uuid, logging, json, bcrypt, jwt, io, base64, asyncio
 import pandas as pd
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, ToolCallStart, ToolCallReady, StreamDone
+from emergentintegrations.llm.openai import OpenAISpeechToText
+
+import barcode as barcode_lib
+from barcode.writer import ImageWriter
+import qrcode as qrcode_lib
+from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+import requests as ext_requests
+from sqlalchemy import create_engine, text as sa_text
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -155,6 +166,16 @@ class ChatIn(BaseModel):
 class ImageScanIn(BaseModel):
     image_base64: str
 
+class ConnectorIn(BaseModel):
+    name: str
+    kind: Literal["rest", "postgresql", "mysql"]
+    config: Dict[str, Any] = {}
+
+class ApprovalDecision(BaseModel):
+    reason: Optional[str] = ""
+
+APPROVAL_THRESHOLD = 50  # abs delta above which workers need manager approval
+
 # ---------- Auth ----------
 @api.post("/auth/signup")
 async def signup(inp: SignupIn):
@@ -207,7 +228,7 @@ async def create_user(inp: UserCreate, user=Depends(require_role("org_admin"))):
          "created_at": now_iso(), "active": True}
     await db.users.insert_one(u)
     await audit(user, "create", "user", u["id"], after={"email": u["email"], "role": u["role"]})
-    return {k: v for k, v in u.items() if k != "password_hash"}
+    return {k: v for k, v in u.items() if k not in ("password_hash", "_id")}
 
 @api.delete("/users/{uid}")
 async def delete_user(uid: str, user=Depends(require_role("org_admin"))):
@@ -311,20 +332,248 @@ async def create_inventory(inp: InventoryIn, user=Depends(require_role("org_admi
     await db.inventory.insert_one(inv)
     return {k: v for k, v in inv.items() if k != "_id"}
 
+async def apply_adjust(user: Dict, inventory_id: str, new_qty: int, reason: str) -> Dict:
+    inv = await db.inventory.find_one({"id": inventory_id, "org_id": user["org_id"]}, {"_id": 0})
+    if not inv: raise HTTPException(404, "Inventory not found")
+    before = inv["quantity"]
+    await db.inventory.update_one({"id": inventory_id}, {"$set": {"quantity": new_qty, "updated_at": now_iso()}})
+    await db.inventory_transactions.insert_one({
+        "id": new_id(), "org_id": user["org_id"], "inventory_id": inventory_id,
+        "product_id": inv["product_id"], "type": "adjustment",
+        "before_qty": before, "after_qty": new_qty, "reason": reason,
+        "user_id": user["id"], "timestamp": now_iso()
+    })
+    await audit(user, "adjust", "inventory", inventory_id, before={"qty": before}, after={"qty": new_qty}, reason=reason)
+    return {"before": before, "after": new_qty}
+
 @api.post("/inventory/adjust")
 async def adjust_inventory(inp: InventoryAdjust, user=Depends(require_role("org_admin", "manager", "worker"))):
     inv = await db.inventory.find_one({"id": inp.inventory_id, "org_id": user["org_id"]}, {"_id": 0})
     if not inv: raise HTTPException(404, "Inventory not found")
-    before = inv["quantity"]
-    await db.inventory.update_one({"id": inp.inventory_id}, {"$set": {"quantity": inp.new_quantity, "updated_at": now_iso()}})
-    await db.inventory_transactions.insert_one({
-        "id": new_id(), "org_id": user["org_id"], "inventory_id": inp.inventory_id,
-        "product_id": inv["product_id"], "type": "adjustment",
-        "before_qty": before, "after_qty": inp.new_quantity, "reason": inp.reason,
-        "user_id": user["id"], "timestamp": now_iso()
-    })
-    await audit(user, "adjust", "inventory", inp.inventory_id, before={"qty": before}, after={"qty": inp.new_quantity}, reason=inp.reason)
-    return {"ok": True, "before": before, "after": inp.new_quantity}
+    delta = abs(inp.new_quantity - inv["quantity"])
+    # Workers need manager approval when delta > threshold
+    if user["role"] == "worker" and delta > APPROVAL_THRESHOLD:
+        prod = await db.products.find_one({"id": inv["product_id"]}, {"_id": 0, "name": 1, "sku": 1})
+        wh = await db.warehouses.find_one({"id": inv["warehouse_id"]}, {"_id": 0, "name": 1})
+        req = {
+            "id": new_id(), "org_id": user["org_id"], "type": "inventory_adjust",
+            "status": "pending", "requested_by": user["id"], "requested_by_name": user["name"],
+            "product_name": prod["name"] if prod else "", "product_sku": prod["sku"] if prod else "",
+            "warehouse_name": wh["name"] if wh else "",
+            "payload": {"inventory_id": inp.inventory_id, "new_quantity": inp.new_quantity, "current": inv["quantity"], "delta": delta},
+            "reason": inp.reason, "created_at": now_iso(), "resolved_at": None, "resolved_by": None
+        }
+        await db.approvals.insert_one(req)
+        await audit(user, "request", "approval", req["id"], after=req["payload"], reason=inp.reason)
+        return {"ok": True, "approval_required": True, "approval_id": req["id"], "before": inv["quantity"], "after": inp.new_quantity}
+    res = await apply_adjust(user, inp.inventory_id, inp.new_quantity, inp.reason)
+    return {"ok": True, "approval_required": False, **res}
+
+# ---------- Approvals ----------
+@api.get("/approvals")
+async def list_approvals(status_filter: str = "pending", user=Depends(current_user)):
+    q = {"org_id": user["org_id"], "status": status_filter}
+    return await db.approvals.find(q, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+
+@api.post("/approvals/{aid}/approve")
+async def approve(aid: str, inp: ApprovalDecision, user=Depends(require_role("org_admin", "manager"))):
+    req = await db.approvals.find_one({"id": aid, "org_id": user["org_id"], "status": "pending"}, {"_id": 0})
+    if not req: raise HTTPException(404, "Not found or already resolved")
+    if req["type"] == "inventory_adjust":
+        p = req["payload"]
+        await apply_adjust(user, p["inventory_id"], p["new_quantity"], f"[Approved by {user['name']}] {req.get('reason', '')} {inp.reason or ''}")
+    await db.approvals.update_one({"id": aid}, {"$set": {"status": "approved", "resolved_at": now_iso(), "resolved_by": user["name"], "resolver_note": inp.reason or ""}})
+    await audit(user, "approve", "approval", aid, reason=inp.reason or "")
+    return {"ok": True}
+
+@api.post("/approvals/{aid}/reject")
+async def reject(aid: str, inp: ApprovalDecision, user=Depends(require_role("org_admin", "manager"))):
+    req = await db.approvals.find_one({"id": aid, "org_id": user["org_id"], "status": "pending"}, {"_id": 0})
+    if not req: raise HTTPException(404, "Not found or already resolved")
+    await db.approvals.update_one({"id": aid}, {"$set": {"status": "rejected", "resolved_at": now_iso(), "resolved_by": user["name"], "resolver_note": inp.reason or ""}})
+    await audit(user, "reject", "approval", aid, reason=inp.reason or "")
+    return {"ok": True}
+
+# ---------- Voice (Whisper) ----------
+@api.post("/voice/transcribe")
+async def voice_transcribe(file: UploadFile = File(...), language: Optional[str] = Form(None), user=Depends(current_user)):
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(400, "File too large (>25MB)")
+    stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
+    audio = io.BytesIO(content)
+    audio.name = file.filename or "voice.webm"
+    try:
+        resp = await stt.transcribe(
+            file=audio, model="whisper-1", response_format="json",
+            language=language if language else None,
+            prompt="Warehouse inventory query. May mention SKUs, product names, brands, warehouse locations."
+        )
+        return {"text": resp.text}
+    except Exception as e:
+        log.error(f"transcribe error: {e}")
+        raise HTTPException(500, str(e))
+
+# ---------- Barcode / QR label PDF ----------
+@api.get("/products/{pid}/label")
+async def product_label(pid: str, count: int = 6, kind: str = "barcode", user=Depends(current_user)):
+    p = await db.products.find_one({"id": pid, "org_id": user["org_id"]}, {"_id": 0})
+    if not p: raise HTTPException(404, "Not found")
+    org = await db.organizations.find_one({"id": user["org_id"]}, {"_id": 0, "name": 1}) or {}
+    count = max(1, min(count, 40))
+    code_value = p.get("barcode") or p["sku"]
+
+    def make_code_img() -> io.BytesIO:
+        out = io.BytesIO()
+        if kind == "qr":
+            qr = qrcode_lib.QRCode(box_size=6, border=2)
+            qr.add_data(code_value); qr.make(fit=True)
+            qr.make_image(fill_color="black", back_color="white").save(out, format="PNG")
+        else:
+            bc_cls = barcode_lib.get_barcode_class("code128")
+            bc = bc_cls(code_value, writer=ImageWriter())
+            bc.write(out, options={"module_height": 10.0, "font_size": 8, "text_distance": 3.0, "quiet_zone": 2.0, "write_text": True})
+        out.seek(0); return out
+
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    label_w, label_h = 90 * mm, 45 * mm
+    cols, rows = 2, 5
+    per_page = cols * rows
+    gap_x, gap_y = 5 * mm, 5 * mm
+    margin_x = (W - cols * label_w - (cols - 1) * gap_x) / 2
+    margin_y = 15 * mm
+
+    for i in range(count):
+        if i > 0 and i % per_page == 0:
+            c.showPage()
+        col = i % cols
+        row = (i // cols) % rows
+        x = margin_x + col * (label_w + gap_x)
+        y = H - margin_y - (row + 1) * label_h - row * gap_y
+        c.setStrokeColorRGB(0.75, 0.75, 0.75)
+        c.setLineWidth(0.5)
+        c.rect(x, y, label_w, label_h)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(x + 5, y + label_h - 12, (org.get("name", "AIW"))[:40])
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 5, y + label_h - 26, p["name"][:32])
+        c.setFont("Helvetica", 8)
+        c.drawString(x + 5, y + label_h - 38, f"SKU {p['sku']}")
+        if p.get("brand"):
+            c.drawString(x + 5, y + 6, p["brand"][:32])
+        img = ImageReader(make_code_img())
+        img_w = 42 * mm
+        img_h = label_h - 12
+        c.drawImage(img, x + label_w - img_w - 4, y + 6, width=img_w, height=img_h, preserveAspectRatio=True, mask="auto")
+
+    c.save()
+    buf.seek(0)
+    return StreamingResponse(io.BytesIO(buf.getvalue()), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="labels-{p["sku"]}.pdf"'})
+
+# ---------- ERP Connectors ----------
+async def connector_fetch(c: Dict, limit: int = 1000) -> List[Dict]:
+    kind = c["kind"]; cfg = c.get("config", {}) or {}
+    fmap = cfg.get("field_map", {}) or {}
+    def apply_map(row: Dict) -> Dict:
+        row_l = {str(k).lower(): v for k, v in row.items()}
+        if not fmap:
+            return {k: row_l.get(k) for k in ["sku", "name", "barcode", "brand", "category", "model_number", "description"]}
+        return {std: row_l.get(str(src).lower()) for std, src in fmap.items() if src}
+    if kind == "rest":
+        if not cfg.get("url"): raise ValueError("Missing 'url' in config")
+        headers = {}
+        if cfg.get("auth_header") and cfg.get("auth_value"):
+            headers[cfg["auth_header"]] = cfg["auth_value"]
+        r = ext_requests.get(cfg["url"], headers=headers, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        path = (cfg.get("data_path") or "").strip()
+        for step in [s for s in path.split(".") if s]:
+            data = data.get(step) if isinstance(data, dict) else None
+        if not isinstance(data, list):
+            raise ValueError("REST endpoint must return (or point to) a JSON array")
+        return [apply_map(row) for row in data[:limit] if isinstance(row, dict)]
+    if kind in ("postgresql", "mysql"):
+        for req_k in ("host", "user", "password", "database"):
+            if not cfg.get(req_k): raise ValueError(f"Missing '{req_k}' in config")
+        if kind == "postgresql":
+            url = f"postgresql+psycopg2://{cfg['user']}:{cfg['password']}@{cfg['host']}:{cfg.get('port', 5432)}/{cfg['database']}"
+        else:
+            url = f"mysql+pymysql://{cfg['user']}:{cfg['password']}@{cfg['host']}:{cfg.get('port', 3306)}/{cfg['database']}"
+        engine = create_engine(url, connect_args={"connect_timeout": 10} if kind == "postgresql" else {"connect_timeout": 10})
+        query = cfg.get("query") or f"SELECT * FROM {cfg.get('table', 'products')} LIMIT {limit}"
+        with engine.connect() as conn:
+            res = conn.execute(sa_text(query))
+            rows = [dict(r._mapping) for r in res.fetchall()]
+        return [apply_map(r) for r in rows[:limit]]
+    raise ValueError(f"Unknown connector kind: {kind}")
+
+@api.get("/connectors")
+async def list_connectors(user=Depends(require_role("org_admin"))):
+    items = await db.connectors.find({"org_id": user["org_id"]}, {"_id": 0}).to_list(200)
+    # Hide password fields in responses
+    for it in items:
+        cfg = it.get("config") or {}
+        if "password" in cfg: cfg["password"] = "••••••" if cfg["password"] else ""
+        if "auth_value" in cfg: cfg["auth_value"] = "••••••" if cfg["auth_value"] else ""
+    return items
+
+@api.post("/connectors")
+async def create_connector(inp: ConnectorIn, user=Depends(require_role("org_admin"))):
+    c = {"id": new_id(), "org_id": user["org_id"], **inp.model_dump(), "active": False, "last_sync": None, "created_at": now_iso()}
+    await db.connectors.insert_one(c)
+    await audit(user, "create", "connector", c["id"], after={"name": c["name"], "kind": c["kind"]})
+    return {k: v for k, v in c.items() if k != "_id"}
+
+@api.delete("/connectors/{cid}")
+async def delete_connector(cid: str, user=Depends(require_role("org_admin"))):
+    await db.connectors.delete_one({"id": cid, "org_id": user["org_id"]})
+    await audit(user, "delete", "connector", cid)
+    return {"ok": True}
+
+@api.post("/connectors/{cid}/test")
+async def test_connector(cid: str, user=Depends(require_role("org_admin"))):
+    c = await db.connectors.find_one({"id": cid, "org_id": user["org_id"]}, {"_id": 0})
+    if not c: raise HTTPException(404, "Not found")
+    try:
+        sample = await connector_fetch(c, limit=3)
+        return {"ok": True, "sample": sample, "count": len(sample)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@api.post("/connectors/{cid}/sync")
+async def sync_connector(cid: str, user=Depends(require_role("org_admin"))):
+    c = await db.connectors.find_one({"id": cid, "org_id": user["org_id"]}, {"_id": 0})
+    if not c: raise HTTPException(404, "Not found")
+    try:
+        rows = await connector_fetch(c, limit=2000)
+    except Exception as e:
+        raise HTTPException(400, f"Fetch failed: {e}")
+    imported, updated, skipped = 0, 0, 0
+    for row in rows:
+        sku = str(row.get("sku") or "").strip()
+        name = str(row.get("name") or "").strip()
+        if not sku or not name:
+            skipped += 1; continue
+        base = {
+            "name": name,
+            "barcode": str(row.get("barcode") or ""), "brand": str(row.get("brand") or ""),
+            "category": str(row.get("category") or ""), "model_number": str(row.get("model_number") or ""),
+            "description": str(row.get("description") or "")
+        }
+        existing = await db.products.find_one({"org_id": user["org_id"], "sku": sku})
+        if existing:
+            await db.products.update_one({"id": existing["id"]}, {"$set": base})
+            updated += 1
+        else:
+            await db.products.insert_one({"id": new_id(), "org_id": user["org_id"], "sku": sku, **base, "image_url": "", "attributes": {}, "created_at": now_iso()})
+            imported += 1
+    await db.connectors.update_one({"id": cid}, {"$set": {"last_sync": now_iso(), "active": True}})
+    await audit(user, "sync", "connector", cid, after={"imported": imported, "updated": updated, "skipped": skipped})
+    return {"imported": imported, "updated": updated, "skipped": skipped}
 
 @api.post("/inventory/transfer")
 async def transfer_inventory(inp: InventoryTransfer, user=Depends(require_role("org_admin", "manager"))):

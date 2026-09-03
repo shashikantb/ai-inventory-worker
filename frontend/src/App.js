@@ -15,6 +15,8 @@ import Users from "@/pages/Users";
 import ImportPage from "@/pages/ImportPage";
 import AuditLogs from "@/pages/AuditLogs";
 import Landing from "@/pages/Landing";
+import Connectors from "@/pages/Connectors";
+import Approvals from "@/pages/Approvals";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -46,6 +48,8 @@ export default function App() {
       <Route path="/app/warehouses" element={<Protected><Warehouses /></Protected>} />
       <Route path="/app/users" element={<Protected><Users /></Protected>} />
       <Route path="/app/import" element={<Protected><ImportPage /></Protected>} />
+      <Route path="/app/connectors" element={<Protected><Connectors /></Protected>} />
+      <Route path="/app/approvals" element={<Protected><Approvals /></Protected>} />
       <Route path="/app/audit" element={<Protected><AuditLogs /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

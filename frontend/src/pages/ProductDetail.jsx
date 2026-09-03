@@ -7,9 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Package, MapPin, Edit3 } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Edit3, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -39,6 +41,18 @@ export default function ProductDetail() {
   const { product, inventory } = data;
   const canAdjust = ["org_admin", "manager", "worker"].includes(user?.role);
 
+  const openLabel = async (kind) => {
+    try {
+      const token = localStorage.getItem("aiw_token");
+      const resp = await fetch(`${API}/products/${product.id}/label?kind=${kind}&count=10`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) throw new Error("Failed");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast.error("Label generation failed"); }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6" data-testid="product-detail-page">
       <Link to="/app/products" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="w-4 h-4" /> Back to products</Link>
@@ -56,6 +70,10 @@ export default function ProductDetail() {
               {product.model_number && <Badge variant="outline">Model {product.model_number}</Badge>}
             </div>
             {product.description && <p className="text-sm text-muted-foreground mt-3">{product.description}</p>}
+            <div className="flex gap-2 mt-4">
+              <Button size="sm" variant="outline" onClick={() => openLabel("barcode")} data-testid="print-barcode-btn"><Printer className="w-3.5 h-3.5 mr-1.5" /> Barcode labels</Button>
+              <Button size="sm" variant="outline" onClick={() => openLabel("qr")} data-testid="print-qr-btn"><Printer className="w-3.5 h-3.5 mr-1.5" /> QR labels</Button>
+            </div>
           </div>
         </div>
       </div>
