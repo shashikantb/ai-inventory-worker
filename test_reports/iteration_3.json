@@ -1,0 +1,21 @@
+{
+  "summary": "Iteration 3 backend+frontend fully verified. Backend: 12/12 pytest pass in /app/backend/tests/test_iteration3.py covering (a) label-template PUT/GET roundtrip preserving show_price/show_expiry/footer/org_line, (b) product label PDF with ?kind=barcode&count=2&price=499.00&expiry=2027-01-31 returns application/pdf >1KB with %PDF magic, (c) approval-rules CRUD (GET returns {rules, default_threshold}, PUT /org-settings changes default_threshold=25, POST creates Pune+Electronics rule threshold=200, DELETE removes it), (d) resolve_threshold correctness: worker adjusting Samsung Monitor (Electronics @ Pune) by +100 auto-applies with threshold=200 in response; worker adjusting a non-electronics item by +100 requires approval (threshold=25 in response, delta 100 > 25), (e) realtime webhook POST /api/webhooks/connectors/{cid}/{token} with {records:[{sku:'W-01',name:'Test WH'}]} returns 200 and upserts product; wrong token returns 404, (f) cron endpoint POST /api/cron/sync-connectors without auth → 401, wrong bearer → 401, correct Bearer WEBHOOK_CRON_SECRET → 200 {ok:true,queued:true}, (g) role guards: worker gets 403 on PUT /api/label-template and POST /api/approval-rules, (h) multi-tenant isolation: fresh signup org sees empty rules and different footer. Frontend: admin login → /app/settings shows both Label templates + Approval rules tabs with all form controls (org_line, footer, 4 toggles for SKU/brand/price/expiry, save-template-btn, default-threshold-input, save-default-threshold-btn, per-warehouse rule adder); schematic preview updates live — toggling show_price OFF removes '₹ 499.00' and toggling ON reinserts it. /app/connectors renders the copy-webhook-URL block containing full https://.../api/webhooks/connectors/{id}/{token} URL for each connector. /app/ai has ai-speak-toggle button — label switches between 'Voice off' and 'Voice on', localStorage aiw_speak persists across reload (0 ↔ 1).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iteration3.py", "/app/test_reports/pytest/iteration3.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown to 1020 lines — still trending in wrong direction; recommend splitting into routers (labels, approvals, connectors_webhooks) before iteration 4.",
+    "resolve_threshold() reads all approval_rules on every /inventory/adjust call — fine at current scale but consider a per-request cache or a compound index {org_id:1, warehouse_id:1, category:1} if rules grow.",
+    "connector_webhook() has no rate-limit / body-size guard; a rogue integrator could DoS with huge payloads. Consider max records limit (e.g., 5000) and Content-Length check.",
+    "cron_sync_connectors() uses asyncio.create_task(...) fire-and-forget — errors are only logged; consider persisting last cron run + error to a collection for observability.",
+    "Label template GET returns raw doc including org_id field to the client — harmless but leaks internal id shape; prefer projecting only whitelisted fields."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration3.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin borgavakarshashikant@gmail.com / AdminPass@2026; Worker worker1@example.com / Worker@2026",
+  "seed_data_creation": "test_iteration3 sets default_threshold=25, creates+deletes a Pune+Electronics rule (200), creates+deletes TEST_wh_* connector, creates a TEST_iter3_org2_* signup org. Label template for org A left with footer='ORG_A_FOOTER' and show_price/show_expiry enabled — this is the state observed in the frontend preview.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3 test suite at /app/backend/tests/test_iteration3.py runs in ~5s. It relies on WEBHOOK_CRON_SECRET being present in /app/backend/.env (read directly from file). Iteration 2 suite still passes independently. Note: after this run the org's default_threshold is 25 and label template has show_price=True/show_expiry=True/footer='ORG_A_FOOTER'. The Pune+Electronics rule was deleted at end of test."
+}

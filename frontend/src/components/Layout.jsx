@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, MessageSquare, ScanLine, Package, Warehouse, Users, Upload, ScrollText, LogOut, Menu, X, Sparkles, Boxes, Plug, ClipboardCheck } from "lucide-react";
+import { LayoutDashboard, MessageSquare, ScanLine, Package, Warehouse, Users, Upload, ScrollText, LogOut, Menu, X, Sparkles, Boxes, Plug, ClipboardCheck, Settings as SettingsIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 
@@ -18,6 +18,7 @@ const NAV = [
   { to: "/app/approvals", label: "Approvals", icon: ClipboardCheck, testid: "nav-approvals", roles: ["org_admin", "manager"] },
   { to: "/app/users", label: "Users", icon: Users, testid: "nav-users", roles: ["org_admin", "manager"] },
   { to: "/app/audit", label: "Audit Logs", icon: ScrollText, testid: "nav-audit", roles: ["org_admin", "manager"] },
+  { to: "/app/settings", label: "Settings", icon: SettingsIcon, testid: "nav-settings", roles: ["org_admin", "manager"] },
 ];
 
 const SidebarBody = ({ user, onClose }) => (

@@ -1,0 +1,8 @@
+crons:
+  - name: sync-connectors
+    description: "Polls active ERP connectors every 15 minutes and upserts product data"
+    cron: "*/15 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/sync-connectors"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

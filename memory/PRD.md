@@ -99,3 +99,30 @@ Build a universal AI-powered SaaS platform for warehouse & inventory operations 
 - Native mobile PWA shell
 - Product image upload / thumbnails
 - Supplier & purchase-order module
+
+---
+
+## Iteration 3 (Feb 2026): Realtime, Voice-out, Label templates, Approval rules
+
+### Added
+- **Realtime Sync** — every connector auto-gets a signed `webhook_token`. External systems can POST `[{...}]` or `{records:[...]}` to `/api/webhooks/connectors/{cid}/{token}` for instant upsert (field-map aware). Copy-webhook-URL button in Connectors UI. Platform cron `.emergent/crons.yml` (every 15 min) hits `/api/cron/sync-connectors` (Bearer WEBHOOK_CRON_SECRET) which enqueues a background sync of every active connector.
+- **Voice Response** — AI Chat "Voice on/off" toggle uses browser `speechSynthesis` to read the assistant's final answer aloud. No external cost. Toggle persists across sessions.
+- **Label Templates** — per-org label template (`GET/PUT /api/label-template`) with toggles for SKU / brand / price / expiry, custom header line and footer. `/api/products/{id}/label?price=...&expiry=...` honors the template. Live schematic preview in Settings → Label templates.
+- **Approval Rules** — `GET/POST/DELETE /api/approval-rules` with per-warehouse and per-category thresholds. Org-wide default via `PUT /api/org-settings`. `resolve_threshold()` picks the most specific match (warehouse+category > warehouse > category > default). Adjust endpoint returns the resolved threshold in its response.
+
+### Verified (curl)
+- Webhook POST → 2 products imported → visible in catalog
+- Cron endpoint → 401 without token, 401 wrong token, 200 with correct secret
+- Label PDF with `price=499.00&expiry=2027-01-31` → 14 KB PDF
+- Approval rule for Pune + Electronics @ 200 units created and listed
+
+### Ops
+- `WEBHOOK_CRON_SECRET` added to `backend/.env`
+- `.emergent/crons.yml` schedules `sync-connectors` every 15 min
+
+### Backlog remaining
+- Native PWA / offline mode
+- Product image upload + thumbnails
+- Supplier & purchase-order module
+- Email digests + push notifications
+- Localised label paper sizes (letter/A6)

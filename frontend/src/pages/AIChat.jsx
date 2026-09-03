@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Sparkles, Send, Loader2, User, Wrench, Bot, Mic, MicOff } from "lucide-react";
+import { Sparkles, Send, Loader2, User, Wrench, Bot, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -22,11 +22,23 @@ export default function AIChat() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [model, setModel] = useState("claude");
+  const [speak, setSpeak] = useState(() => localStorage.getItem("aiw_speak") === "1");
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const mediaRef = useRef(null);
   const chunksRef = useRef([]);
   const endRef = useRef(null);
+
+  useEffect(() => { localStorage.setItem("aiw_speak", speak ? "1" : "0"); }, [speak]);
+  const speakText = (text) => {
+    try {
+      const t = (text || "").trim(); if (!t) return;
+      const u = new SpeechSynthesisUtterance(t);
+      u.rate = 1.05; u.pitch = 1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    } catch {}
+  };
 
   const startRec = async () => {
     try {
@@ -106,6 +118,9 @@ export default function AIChat() {
             });
           } else if (data.type === "done") {
             setSessionId(data.session_id);
+            if (speak) {
+              setMessages(cur => { const last = cur[cur.length - 1]; if (last?.role === "assistant") speakText(last.content); return cur; });
+            }
           } else if (data.type === "error") {
             toast.error(data.error);
           }
@@ -123,13 +138,19 @@ export default function AIChat() {
           <div className="text-xs font-mono uppercase tracking-widest text-primary mb-1">AI Assistant</div>
           <h1 className="font-heading font-extrabold uppercase text-3xl tracking-tight">Ask anything</h1>
         </div>
-        <Select value={model} onValueChange={setModel}>
-          <SelectTrigger className="w-40" data-testid="ai-model-select"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="claude">Claude Sonnet 4.6</SelectItem>
-            <SelectItem value="gemini">Gemini 3 Flash</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { setSpeak(!speak); if (speak) window.speechSynthesis?.cancel(); }} className={speak ? "border-primary/50 text-primary" : ""} data-testid="ai-speak-toggle">
+            {speak ? <Volume2 className="w-4 h-4 mr-1.5" /> : <VolumeX className="w-4 h-4 mr-1.5" />}
+            {speak ? "Voice on" : "Voice off"}
+          </Button>
+          <Select value={model} onValueChange={setModel}>
+            <SelectTrigger className="w-40" data-testid="ai-model-select"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="claude">Claude Sonnet 4.6</SelectItem>
+              <SelectItem value="gemini">Gemini 3 Flash</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">

@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plug, Plus, Trash2, RefreshCw, PlayCircle, CheckCircle2, XCircle } from "lucide-react";
+import { Plug, Plus, Trash2, RefreshCw, PlayCircle, CheckCircle2, XCircle, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 const KIND_LABELS = { rest: "REST API", postgresql: "PostgreSQL", mysql: "MySQL" };
@@ -168,6 +168,16 @@ export default function Connectors() {
                 ) : (
                   <div className="text-destructive flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> {testRes[c.id].error}</div>
                 )}
+              </div>
+            )}
+            {c.webhook_token && (
+              <div className="mt-3 p-3 rounded bg-secondary/40 border border-border text-xs">
+                <div className="font-mono uppercase text-muted-foreground mb-1 flex items-center justify-between">
+                  <span>Realtime webhook URL</span>
+                  <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => { navigator.clipboard.writeText(`${process.env.REACT_APP_BACKEND_URL}/api/webhooks/connectors/${c.id}/${c.webhook_token}`); toast.success("Webhook URL copied"); }} data-testid={`copy-webhook-${c.name}`}><Copy className="w-3 h-3 mr-1" /> Copy</Button>
+                </div>
+                <div className="font-mono break-all text-primary">{`${process.env.REACT_APP_BACKEND_URL}/api/webhooks/connectors/${c.id}/${c.webhook_token}`}</div>
+                <div className="mt-1 text-muted-foreground">POST an array of records or {"{records: [...]}"} — auto-mapped through field mapping.</div>
               </div>
             )}
           </div>

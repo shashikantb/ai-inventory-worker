@@ -1,5 +1,5 @@
 """AI INVENTORY WORKER - Backend API"""
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import os, uuid, logging, json, bcrypt, jwt, io, base64, asyncio
+import os, uuid, logging, json, bcrypt, jwt, io, base64, asyncio, secrets
 import pandas as pd
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, ToolCallStart, ToolCallReady, StreamDone
@@ -36,6 +36,7 @@ EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
 ADMIN_EMAIL = os.environ['ADMIN_EMAIL']
 ADMIN_PASSWORD = os.environ['ADMIN_PASSWORD']
 ADMIN_NAME = os.environ['ADMIN_NAME']
+WEBHOOK_CRON_SECRET = os.environ.get('WEBHOOK_CRON_SECRET', 'unset')
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -174,7 +175,41 @@ class ConnectorIn(BaseModel):
 class ApprovalDecision(BaseModel):
     reason: Optional[str] = ""
 
-APPROVAL_THRESHOLD = 50  # abs delta above which workers need manager approval
+class LabelTemplateIn(BaseModel):
+    org_line: Optional[str] = ""
+    logo_url: Optional[str] = ""
+    show_brand: bool = True
+    show_sku: bool = True
+    show_price: bool = False
+    show_expiry: bool = False
+    footer: Optional[str] = ""
+
+class ApprovalRuleIn(BaseModel):
+    warehouse_id: Optional[str] = None
+    category: Optional[str] = None
+    threshold: int
+
+class OrgSettingsIn(BaseModel):
+    default_threshold: int
+
+APPROVAL_THRESHOLD = 50  # legacy fallback; superseded by resolve_threshold()
+
+async def resolve_threshold(org_id: str, warehouse_id: Optional[str], category: Optional[str]) -> int:
+    rules = await db.approval_rules.find({"org_id": org_id}, {"_id": 0}).to_list(500)
+    best, best_score = None, -1
+    for r in rules:
+        score = 0
+        if r.get("warehouse_id"):
+            if r["warehouse_id"] != warehouse_id: continue
+            score += 2
+        if r.get("category"):
+            if r["category"] != category: continue
+            score += 1
+        if score > best_score:
+            best_score, best = score, r
+    if best: return int(best.get("threshold", APPROVAL_THRESHOLD))
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    return int((org or {}).get("default_threshold", APPROVAL_THRESHOLD))
 
 # ---------- Auth ----------
 @api.post("/auth/signup")
@@ -351,23 +386,23 @@ async def adjust_inventory(inp: InventoryAdjust, user=Depends(require_role("org_
     inv = await db.inventory.find_one({"id": inp.inventory_id, "org_id": user["org_id"]}, {"_id": 0})
     if not inv: raise HTTPException(404, "Inventory not found")
     delta = abs(inp.new_quantity - inv["quantity"])
-    # Workers need manager approval when delta > threshold
-    if user["role"] == "worker" and delta > APPROVAL_THRESHOLD:
-        prod = await db.products.find_one({"id": inv["product_id"]}, {"_id": 0, "name": 1, "sku": 1})
+    prod = await db.products.find_one({"id": inv["product_id"]}, {"_id": 0, "name": 1, "sku": 1, "category": 1})
+    threshold = await resolve_threshold(user["org_id"], inv["warehouse_id"], (prod or {}).get("category"))
+    if user["role"] == "worker" and delta > threshold:
         wh = await db.warehouses.find_one({"id": inv["warehouse_id"]}, {"_id": 0, "name": 1})
         req = {
             "id": new_id(), "org_id": user["org_id"], "type": "inventory_adjust",
             "status": "pending", "requested_by": user["id"], "requested_by_name": user["name"],
             "product_name": prod["name"] if prod else "", "product_sku": prod["sku"] if prod else "",
             "warehouse_name": wh["name"] if wh else "",
-            "payload": {"inventory_id": inp.inventory_id, "new_quantity": inp.new_quantity, "current": inv["quantity"], "delta": delta},
+            "payload": {"inventory_id": inp.inventory_id, "new_quantity": inp.new_quantity, "current": inv["quantity"], "delta": delta, "threshold_at_request": threshold},
             "reason": inp.reason, "created_at": now_iso(), "resolved_at": None, "resolved_by": None
         }
         await db.approvals.insert_one(req)
         await audit(user, "request", "approval", req["id"], after=req["payload"], reason=inp.reason)
-        return {"ok": True, "approval_required": True, "approval_id": req["id"], "before": inv["quantity"], "after": inp.new_quantity}
+        return {"ok": True, "approval_required": True, "approval_id": req["id"], "threshold": threshold, "before": inv["quantity"], "after": inp.new_quantity}
     res = await apply_adjust(user, inp.inventory_id, inp.new_quantity, inp.reason)
-    return {"ok": True, "approval_required": False, **res}
+    return {"ok": True, "approval_required": False, "threshold": threshold, **res}
 
 # ---------- Approvals ----------
 @api.get("/approvals")
@@ -416,10 +451,17 @@ async def voice_transcribe(file: UploadFile = File(...), language: Optional[str]
 
 # ---------- Barcode / QR label PDF ----------
 @api.get("/products/{pid}/label")
-async def product_label(pid: str, count: int = 6, kind: str = "barcode", user=Depends(current_user)):
+async def product_label(pid: str, count: int = 6, kind: str = "barcode", price: Optional[str] = None, expiry: Optional[str] = None, user=Depends(current_user)):
     p = await db.products.find_one({"id": pid, "org_id": user["org_id"]}, {"_id": 0})
     if not p: raise HTTPException(404, "Not found")
     org = await db.organizations.find_one({"id": user["org_id"]}, {"_id": 0, "name": 1}) or {}
+    tpl = await db.label_templates.find_one({"org_id": user["org_id"]}, {"_id": 0}) or {}
+    org_line = (tpl.get("org_line") or org.get("name") or "AIW")[:40]
+    show_brand = tpl.get("show_brand", True)
+    show_sku = tpl.get("show_sku", True)
+    show_price = tpl.get("show_price", False) and price
+    show_expiry = tpl.get("show_expiry", False) and expiry
+    footer = (tpl.get("footer") or "").strip()
     count = max(1, min(count, 40))
     code_value = p.get("barcode") or p["sku"]
 
@@ -456,13 +498,24 @@ async def product_label(pid: str, count: int = 6, kind: str = "barcode", user=De
         c.setLineWidth(0.5)
         c.rect(x, y, label_w, label_h)
         c.setFont("Helvetica-Bold", 8)
-        c.drawString(x + 5, y + label_h - 12, (org.get("name", "AIW"))[:40])
+        c.drawString(x + 5, y + label_h - 12, org_line)
         c.setFont("Helvetica-Bold", 11)
         c.drawString(x + 5, y + label_h - 26, p["name"][:32])
         c.setFont("Helvetica", 8)
-        c.drawString(x + 5, y + label_h - 38, f"SKU {p['sku']}")
-        if p.get("brand"):
+        line_y = y + label_h - 38
+        if show_sku:
+            c.drawString(x + 5, line_y, f"SKU {p['sku']}"); line_y -= 10
+        if show_price:
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(x + 5, line_y, f"₹ {price}")
+            c.setFont("Helvetica", 8); line_y -= 12
+        if show_expiry:
+            c.drawString(x + 5, line_y, f"EXP {expiry}"); line_y -= 10
+        if show_brand and p.get("brand"):
             c.drawString(x + 5, y + 6, p["brand"][:32])
+        if footer:
+            c.setFont("Helvetica-Oblique", 6)
+            c.drawString(x + 5, y + 2, footer[:60])
         img = ImageReader(make_code_img())
         img_w = 42 * mm
         img_h = label_h - 12
@@ -523,7 +576,7 @@ async def list_connectors(user=Depends(require_role("org_admin"))):
 
 @api.post("/connectors")
 async def create_connector(inp: ConnectorIn, user=Depends(require_role("org_admin"))):
-    c = {"id": new_id(), "org_id": user["org_id"], **inp.model_dump(), "active": False, "last_sync": None, "created_at": now_iso()}
+    c = {"id": new_id(), "org_id": user["org_id"], **inp.model_dump(), "active": False, "last_sync": None, "webhook_token": secrets.token_urlsafe(24), "created_at": now_iso()}
     await db.connectors.insert_one(c)
     await audit(user, "create", "connector", c["id"], after={"name": c["name"], "kind": c["kind"]})
     return {k: v for k, v in c.items() if k != "_id"}
@@ -804,6 +857,107 @@ async def dashboard_stats(user=Depends(current_user)):
 @api.get("/audit-logs")
 async def get_audit_logs(limit: int = 100, user=Depends(require_role("org_admin", "manager"))):
     return await db.audit_logs.find({"org_id": user["org_id"]}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+
+# ---------- Realtime: Webhooks + Cron polling ----------
+async def _apply_records(org_id: str, fmap: Dict, records: List[Dict]) -> Dict:
+    imported, updated, skipped = 0, 0, 0
+    for row in records:
+        if not isinstance(row, dict):
+            skipped += 1; continue
+        row_l = {str(k).lower(): v for k, v in row.items()}
+        mapped = {std: row_l.get(str(src).lower()) for std, src in (fmap or {}).items() if src} if fmap else row_l
+        sku = str(mapped.get("sku") or "").strip()
+        name = str(mapped.get("name") or "").strip()
+        if not sku or not name:
+            skipped += 1; continue
+        base = {"name": name, "barcode": str(mapped.get("barcode") or ""), "brand": str(mapped.get("brand") or ""),
+                "category": str(mapped.get("category") or ""), "model_number": str(mapped.get("model_number") or ""),
+                "description": str(mapped.get("description") or "")}
+        existing = await db.products.find_one({"org_id": org_id, "sku": sku})
+        if existing:
+            await db.products.update_one({"id": existing["id"]}, {"$set": base})
+            updated += 1
+        else:
+            await db.products.insert_one({"id": new_id(), "org_id": org_id, "sku": sku, **base, "image_url": "", "attributes": {}, "created_at": now_iso()})
+            imported += 1
+    return {"imported": imported, "updated": updated, "skipped": skipped}
+
+@api.post("/webhooks/connectors/{cid}/{token}")
+async def connector_webhook(cid: str, token: str, payload: Any = Body(...)):
+    c = await db.connectors.find_one({"id": cid, "webhook_token": token}, {"_id": 0})
+    if not c: raise HTTPException(404, "Invalid webhook")
+    records = payload.get("records") if isinstance(payload, dict) and "records" in payload else (payload if isinstance(payload, list) else None)
+    if not isinstance(records, list):
+        raise HTTPException(400, "Payload must be an array or {records: [...]}")
+    fmap = (c.get("config") or {}).get("field_map") or {}
+    res = await _apply_records(c["org_id"], fmap, records)
+    await db.connectors.update_one({"id": cid}, {"$set": {"last_sync": now_iso(), "active": True}})
+    return {"ok": True, **res}
+
+async def _run_all_connector_syncs():
+    active = await db.connectors.find({"active": True}, {"_id": 0}).to_list(500)
+    for c in active:
+        try:
+            rows = await connector_fetch(c, limit=2000)
+            fmap_pass = None if fmap_already_applied_in_fetch() else (c.get("config") or {}).get("field_map")
+            res = await _apply_records(c["org_id"], fmap_pass, rows)
+            await db.connectors.update_one({"id": c["id"]}, {"$set": {"last_sync": now_iso()}})
+            log.info(f"cron synced {c['name']}: {res}")
+        except Exception as e:
+            log.error(f"cron sync failed {c.get('name')}: {e}")
+
+def fmap_already_applied_in_fetch() -> bool:
+    return True  # connector_fetch already applies field_map
+
+@api.post("/cron/sync-connectors")
+async def cron_sync_connectors(request: Request):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer ") or not secrets.compare_digest(auth[7:], WEBHOOK_CRON_SECRET):
+        raise HTTPException(401, "unauthorized")
+    asyncio.create_task(_run_all_connector_syncs())
+    return {"ok": True, "queued": True}
+
+# ---------- Label templates ----------
+@api.get("/label-template")
+async def get_label_template(user=Depends(current_user)):
+    t = await db.label_templates.find_one({"org_id": user["org_id"]}, {"_id": 0})
+    if not t:
+        return {"org_line": "", "logo_url": "", "show_brand": True, "show_sku": True, "show_price": False, "show_expiry": False, "footer": ""}
+    return t
+
+@api.put("/label-template")
+async def put_label_template(inp: LabelTemplateIn, user=Depends(require_role("org_admin", "manager"))):
+    doc = {"org_id": user["org_id"], **inp.model_dump(), "updated_at": now_iso()}
+    await db.label_templates.update_one({"org_id": user["org_id"]}, {"$set": doc}, upsert=True)
+    await audit(user, "update", "label_template", user["org_id"], after=inp.model_dump())
+    return {"ok": True}
+
+# ---------- Approval rules ----------
+@api.get("/approval-rules")
+async def list_approval_rules(user=Depends(current_user)):
+    rules = await db.approval_rules.find({"org_id": user["org_id"]}, {"_id": 0}).to_list(200)
+    org = await db.organizations.find_one({"id": user["org_id"]}, {"_id": 0}) or {}
+    return {"rules": rules, "default_threshold": org.get("default_threshold", APPROVAL_THRESHOLD)}
+
+@api.post("/approval-rules")
+async def create_approval_rule(inp: ApprovalRuleIn, user=Depends(require_role("org_admin"))):
+    r = {"id": new_id(), "org_id": user["org_id"], **inp.model_dump(), "created_at": now_iso()}
+    await db.approval_rules.insert_one(r)
+    await audit(user, "create", "approval_rule", r["id"], after=inp.model_dump())
+    return {k: v for k, v in r.items() if k != "_id"}
+
+@api.delete("/approval-rules/{rid}")
+async def delete_approval_rule(rid: str, user=Depends(require_role("org_admin"))):
+    await db.approval_rules.delete_one({"id": rid, "org_id": user["org_id"]})
+    await audit(user, "delete", "approval_rule", rid)
+    return {"ok": True}
+
+@api.put("/org-settings")
+async def put_org_settings(inp: OrgSettingsIn, user=Depends(require_role("org_admin"))):
+    await db.organizations.update_one({"id": user["org_id"]}, {"$set": {"default_threshold": inp.default_threshold}})
+    await audit(user, "update", "org_settings", user["org_id"], after=inp.model_dump())
+    return {"ok": True}
 
 # ---------- Seed admin ----------
 async def seed_admin():
